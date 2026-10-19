@@ -17,14 +17,15 @@ import {
 } from "./openRouterApi";
 import { Statistics } from "./statistics";
 import { StatusBar } from "./statusBar";
+import { renderSettingsTabs } from "./settingsComponents";
 
 export type TranscriptionProviderName = "gemini" | "openrouter";
 
-export interface GeminiTranscriberSettings {
+export interface TranscriptionProfile {
+    id: string;
+    name: string;
     provider: TranscriptionProviderName;
-    geminiApiKeySecretName: string;
     modelName: string;
-    openRouterApiKeySecretName: string;
     openRouterModel: string;
     openRouterModelIsStt: boolean;
     openRouterReasoningEffort: string;
@@ -32,15 +33,22 @@ export interface GeminiTranscriberSettings {
     openRouterPostProcessingProviders: string[];
     openRouterPostProcessingReasoningEffort: string;
     openRouterProviders: string[];
-    openRouterModelCache: OpenRouterModelCache | undefined;
-    openRouterPostProcessingModelCache: OpenRouterModelCache | undefined;
-    openRouterProviderCache: Record<string, string[]>;
     enablePostProcessing: boolean;
     geminiPostProcessingModel: string;
     postProcessingPrompt: string;
     language: string;
     customPrompt: boolean;
     prompt: string;
+}
+
+export interface GeminiTranscriberSettings {
+    profiles: TranscriptionProfile[];
+    activeProfileId: string;
+    geminiApiKeySecretName: string;
+    openRouterApiKeySecretName: string;
+    openRouterModelCache: OpenRouterModelCache | undefined;
+    openRouterPostProcessingModelCache: OpenRouterModelCache | undefined;
+    openRouterProviderCache: Record<string, string[]>;
     saveAudioFile: boolean;
     saveByNoteLocation: boolean;
     audioFileSaveLocation: string;
@@ -57,11 +65,11 @@ export interface GeminiTranscriberSettings {
     saveToClipBoard: boolean;
 }
 
-export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
+export const DEFAULT_PROFILE: TranscriptionProfile = {
+    id: "default",
+    name: "Standard",
     provider: "gemini",
-    geminiApiKeySecretName: "",
     modelName: "gemini-2.0-flash",
-    openRouterApiKeySecretName: "",
     openRouterModel: "",
     openRouterModelIsStt: false,
     openRouterReasoningEffort: "",
@@ -69,15 +77,22 @@ export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
     openRouterPostProcessingProviders: [],
     openRouterPostProcessingReasoningEffort: "",
     openRouterProviders: [],
-    openRouterModelCache: undefined,
-    openRouterPostProcessingModelCache: undefined,
-    openRouterProviderCache: {},
     enablePostProcessing: false,
     geminiPostProcessingModel: "gemini-2.0-flash",
     postProcessingPrompt: "",
     language: "english",
     customPrompt: false,
-    prompt: "Transcribe the audio to markdown, removing filler words, be precise and don't interpret anything. Language: ",
+    prompt: "Transcribe the audio to markdown, removing filler words, be precise and don't interpret anything. Language: english",
+};
+
+export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
+    profiles: [{ ...DEFAULT_PROFILE }],
+    activeProfileId: DEFAULT_PROFILE.id,
+    geminiApiKeySecretName: "",
+    openRouterApiKeySecretName: "",
+    openRouterModelCache: undefined,
+    openRouterPostProcessingModelCache: undefined,
+    openRouterProviderCache: {},
     saveAudioFile: true,
     audioFileSaveLocation: "",
     transcriptSaveLocation: "",
@@ -96,21 +111,30 @@ export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
 
 export class GeminiTranscriberSettingsTab extends PluginSettingTab {
     plugin: GeminiTranscriberPlugin;
+    private activeTab:
+        | "transcription"
+        | "post-processing"
+        | "output"
+        | "appearance"
+        | "api-keys" = "transcription";
 
     constructor(app: App, plugin: GeminiTranscriberPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
 
+    private get profile(): TranscriptionProfile {
+        return this.plugin.getActiveProfile();
+    }
+
     private completePrompt(): void {
-        if (this.plugin.settings.customPrompt) {
+        if (this.profile.customPrompt) {
             return;
         }
 
-        this.plugin.settings.prompt =
-            // Prompt is always set in DEFAULT_SETTINGS
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            DEFAULT_SETTINGS.prompt! + this.plugin.settings.language;
+        this.profile.prompt =
+            "Transcribe the audio to markdown, removing filler words, be precise and don't interpret anything. Language: " +
+            this.profile.language;
     }
 
     private restoreDefaultStatusBarColors() {
@@ -134,8 +158,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
 
     private isSttSelected(): boolean {
         return (
-            this.plugin.settings.provider === "openrouter" &&
-            this.plugin.settings.openRouterModelIsStt
+            this.profile.provider === "openrouter" &&
+            this.profile.openRouterModelIsStt
         );
     }
 
@@ -144,76 +168,193 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         const scrollTop = containerEl.scrollTop;
 
         containerEl.empty();
+        containerEl.addClass("audio-transcriber-settings");
+        this.renderProfileControls(containerEl);
+        this.renderTabs(containerEl);
 
+        const content = containerEl.createDiv({
+            cls: "audio-transcriber-settings-content",
+        });
+
+        switch (this.activeTab) {
+            case "transcription":
+                this.renderTranscriptionTab(content);
+                break;
+            case "post-processing":
+                this.renderPostProcessingSettings(content);
+                break;
+            case "output":
+                this.renderOutputTab(content);
+                break;
+            case "appearance":
+                this.renderAppearanceTab(content);
+                break;
+            case "api-keys":
+                this.renderApiKeysTab(content);
+                break;
+        }
+
+        containerEl.scrollTop = scrollTop;
+    }
+
+    private renderProfileControls(containerEl: HTMLElement) {
         new Setting(containerEl)
-            .setName("Provider")
-            .setDesc("Choose the backend used for transcription.")
-            .addDropdown((dropdown) =>
+            .setName("Transcription profile")
+            .setDesc("Profile for models, prompts, and post-processing.")
+            .addDropdown((dropdown) => {
+                for (const profile of this.plugin.settings.profiles) {
+                    dropdown.addOption(profile.id, profile.name);
+                }
                 dropdown
-                    .addOption("gemini", "Gemini")
-                    .addOption("openrouter", "OpenRouter")
-                    .setValue(this.plugin.settings.provider)
-                    .onChange(async (value) => {
-                        this.plugin.settings.provider =
-                            value as TranscriptionProviderName;
-                        this.plugin.transcriber.reloadProvider();
+                    .setValue(this.profile.id)
+                    .onChange(async (id) => {
+                        this.plugin.settings.activeProfileId = id;
+                        await this.plugin.saveSettings();
+                        this.display();
+                    });
+            })
+            .addButton((button) =>
+                button.setButtonText("New").onClick(async () => {
+                    const newProfile = {
+                        ...DEFAULT_PROFILE,
+                        id: this.newProfileId(),
+                        openRouterProviders: [],
+                        openRouterPostProcessingProviders: [],
+                    };
+                    newProfile.name = `Profile ${this.plugin.settings.profiles.length + 1}`;
+                    this.plugin.settings.profiles.push(newProfile);
+                    this.plugin.settings.activeProfileId = newProfile.id;
+                    await this.plugin.saveSettings();
+                    this.display();
+                }),
+            )
+            .addButton((button) =>
+                button.setButtonText("Copy").onClick(async () => {
+                    const copied = this.plugin.getProfileSnapshot();
+                    copied.id = this.newProfileId();
+                    copied.name = `${copied.name} (Copy)`;
+                    this.plugin.settings.profiles.push(copied);
+                    this.plugin.settings.activeProfileId = copied.id;
+                    await this.plugin.saveSettings();
+                    this.display();
+                }),
+            )
+            .addButton((button) =>
+                button
+                    .setButtonText("Delete")
+                    .setDisabled(this.plugin.settings.profiles.length <= 1)
+                    .onClick(async () => {
+                        if (this.plugin.settings.profiles.length <= 1) {
+                            return;
+                        }
+                        this.plugin.settings.profiles =
+                            this.plugin.settings.profiles.filter(
+                                (profile) => profile.id !== this.profile.id,
+                            );
+                        this.plugin.settings.activeProfileId =
+                            this.plugin.settings.profiles[0].id;
                         await this.plugin.saveSettings();
                         this.display();
                     }),
             );
 
-        if (this.plugin.settings.provider === "openrouter") {
+        new Setting(containerEl)
+            .setName("Profile name")
+            .addText((text) =>
+                text.setValue(this.profile.name).onChange(async (value) => {
+                    this.profile.name = value.trim() || "Profile";
+                    await this.plugin.saveSettings();
+                }),
+            );
+    }
+
+    private newProfileId(): string {
+        return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    }
+
+    private renderTabs(containerEl: HTMLElement) {
+        renderSettingsTabs(
+            containerEl,
+            [
+                { id: "transcription", label: "Transcription" },
+                { id: "post-processing", label: "Post-processing" },
+                { id: "output", label: "Output & audio" },
+                { id: "appearance", label: "Appearance" },
+                { id: "api-keys", label: "API keys" },
+            ],
+            this.activeTab,
+            (tab) => {
+                this.activeTab = tab;
+                this.display();
+            },
+        );
+    }
+
+    private renderTranscriptionTab(containerEl: HTMLElement) {
+        new Setting(containerEl)
+            .setName("API provider")
+            .setDesc("The selected provider is used for this profile.")
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("gemini", "Gemini")
+                    .addOption("openrouter", "OpenRouter")
+                    .setValue(this.profile.provider)
+                    .onChange(async (value) => {
+                        this.profile.provider = value as TranscriptionProviderName;
+                        await this.plugin.saveSettings();
+                        this.display();
+                    }),
+            );
+
+        if (this.profile.provider === "openrouter") {
             this.renderOpenRouterSettings(containerEl);
         } else {
             this.renderGeminiSettings(containerEl);
         }
 
-        this.renderPostProcessingSettings(containerEl);
-
         new Setting(containerEl)
-            .setName("Transcription and output")
-            .setHeading();
-
-        new Setting(containerEl)
-            .setName(
-                `Language ${
-                    this.plugin.settings.customPrompt ? "(disabled)" : ""
-                }`,
-            )
-            .setDesc("Specify the language of the input audio.")
+            .setName(`Language ${this.profile.customPrompt ? "(disabled)" : ""}`)
+            .setDesc("Language of the audio recording.")
             .addText((text) =>
                 text
-                    .setValue(this.plugin.settings.language)
+                    .setValue(this.profile.language)
                     .setPlaceholder("english")
+                    .setDisabled(this.profile.customPrompt)
                     .onChange(async (value) => {
-                        this.plugin.settings.language = value;
+                        this.profile.language = value;
                         this.completePrompt();
                         await this.plugin.saveSettings();
-                    })
-                    .setDisabled(
-                        this.plugin.settings.customPrompt ? true : false,
-                    ),
+                    }),
             );
 
+        if (this.isSttSelected()) {
+            new Setting(containerEl)
+                .setName("Custom prompt")
+                .setHeading()
+                .setDesc(
+                    "STT models do not support a custom prompt. The language is sent as a language parameter.",
+                );
+        } else {
+            this.renderPromptSettings(containerEl);
+        }
+    }
+
+    private renderOutputTab(containerEl: HTMLElement) {
         new Setting(containerEl)
             .setName("Copy transcripts to clipboard")
-            .setDesc(
-                "Enable this option to automatically copy transcripts to your clipboard, so you can paste them (e.g., using Ctrl + V).",
-            )
-            .addToggle((toggle) => {
+            .setDesc("Automatically copy the completed transcript.")
+            .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.saveToClipBoard)
                     .onChange(async (value) => {
                         this.plugin.settings.saveToClipBoard = value;
                         await this.plugin.saveSettings();
-                    });
-            });
+                    }),
+            );
 
         new Setting(containerEl)
-            .setName("Save location for transcripts")
-            .setDesc(
-                "Enter a location inside your vault where the transcripts should be saved if no editor is opened.",
-            )
+            .setName("Transcript save location")
+            .setDesc("Vault path used when no editor is available for output.")
             .addText((text) =>
                 text
                     .setValue(this.plugin.settings.transcriptSaveLocation)
@@ -224,60 +365,57 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                     }),
             );
 
+        this.renderSaveAudioSettings(containerEl);
+    }
+
+    private renderAppearanceTab(containerEl: HTMLElement) {
         new Setting(containerEl)
             .setName("Enable statistics")
-            .setDesc(
-                "Collect plugin usage statistics and view them with a command.",
-            )
+            .setDesc("Collect usage statistics and view them with a command.")
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.enableStatistics)
                     .onChange(async (value) => {
                         this.plugin.settings.enableStatistics = value;
                         await this.plugin.saveSettings();
-
                         if (value) {
-                            this.plugin.statistics = new Statistics(
-                                this.plugin,
-                            );
+                            this.plugin.statistics = new Statistics(this.plugin);
                             this.plugin.statistics.load();
                         } else {
                             this.plugin.statistics = undefined;
                         }
                     }),
             );
-
         this.renderStatusbarSettings(containerEl);
-
-        if (this.isSttSelected()) {
-            new Setting(containerEl)
-                .setName("Custom prompt")
-                .setHeading()
-                .setDesc(
-                    "For STT models no custom prompt is supported. The selected language is sent as the language parameter instead.",
-                );
-        } else {
-            this.renderPromptSettings(containerEl);
-        }
-
-        this.renderSaveAudioSettings(containerEl);
-        containerEl.scrollTop = scrollTop;
     }
 
-    private renderGeminiSettings(containerEl: HTMLElement) {
+    private renderApiKeysTab(containerEl: HTMLElement) {
         new Setting(containerEl)
-            .setName("API key")
-            .setDesc("Select your Gemini api key.")
+            .setName("Gemini API key")
+            .setDesc("Global key shared by all Gemini profiles.")
             .addComponent((el) =>
                 new SecretComponent(this.app, el)
                     .setValue(this.plugin.settings.geminiApiKeySecretName)
                     .onChange(async (value) => {
                         this.plugin.settings.geminiApiKeySecretName = value;
-                        this.plugin.transcriber.reloadApiKey();
                         await this.plugin.saveSettings();
                     }),
             );
 
+        new Setting(containerEl)
+            .setName("OpenRouter API key")
+            .setDesc("Global key shared by all OpenRouter profiles.")
+            .addComponent((el) =>
+                new SecretComponent(this.app, el)
+                    .setValue(this.plugin.settings.openRouterApiKeySecretName)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openRouterApiKeySecretName = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+    }
+
+    private renderGeminiSettings(containerEl: HTMLElement) {
         const modelSetting = new Setting(containerEl)
             .setName("Model name")
             .setDesc(
@@ -285,9 +423,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             )
             .addText((text) =>
                 text
-                    .setValue(this.plugin.settings.modelName)
+                    .setValue(this.profile.modelName)
                     .onChange(async (value) => {
-                        this.plugin.settings.modelName = value;
+                        this.profile.modelName = value;
                         await this.plugin.saveSettings();
                     }),
             );
@@ -300,21 +438,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
     }
 
     private renderOpenRouterSettings(containerEl: HTMLElement) {
-        new Setting(containerEl)
-            .setName("API key")
-            .setDesc("Select your OpenRouter api key.")
-            .addComponent((el) =>
-                new SecretComponent(this.app, el)
-                    .setValue(this.plugin.settings.openRouterApiKeySecretName)
-                    .onChange(async (value) => {
-                        this.plugin.settings.openRouterApiKeySecretName = value;
-                        this.plugin.transcriber.reloadApiKey();
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
         const cache = this.plugin.settings.openRouterModelCache;
-        const selectedModel = this.plugin.settings.openRouterModel;
+        const selectedModel = this.profile.openRouterModel;
         let desc = "No model selected yet.";
         if (selectedModel) {
             const info = cache?.models.find(
@@ -365,9 +490,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                 containerEl,
                 info,
                 cache?.includesReasoningMetadata === true,
-                this.plugin.settings.openRouterReasoningEffort,
+                this.profile.openRouterReasoningEffort,
                 async (value) => {
-                    this.plugin.settings.openRouterReasoningEffort = value;
+                    this.profile.openRouterReasoningEffort = value;
                     await this.plugin.saveSettings();
                 },
             );
@@ -385,37 +510,34 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             )
             .addToggle((toggle) =>
                 toggle
-                    .setValue(this.plugin.settings.enablePostProcessing)
+                    .setValue(this.profile.enablePostProcessing)
                     .onChange(async (value) => {
-                        this.plugin.settings.enablePostProcessing = value;
+                        this.profile.enablePostProcessing = value;
                         await this.plugin.saveSettings();
                         this.display();
                     }),
             );
 
-        if (!this.plugin.settings.enablePostProcessing) {
+        if (!this.profile.enablePostProcessing) {
             return;
         }
 
-        if (this.plugin.settings.provider === "openrouter") {
+        if (this.profile.provider === "openrouter") {
             this.renderOpenRouterPostProcessingModel(containerEl);
             const cache =
                 this.plugin.settings.openRouterPostProcessingModelCache;
-            if (this.plugin.settings.openRouterPostProcessingModel) {
+            if (this.profile.openRouterPostProcessingModel) {
                 const model = cache?.models.find(
                     (item) =>
-                        item.id ===
-                        this.plugin.settings.openRouterPostProcessingModel,
+                        item.id === this.profile.openRouterPostProcessingModel,
                 );
                 this.renderReasoningSetting(
                     containerEl,
                     model,
                     cache?.includesReasoningMetadata === true,
-                    this.plugin.settings
-                        .openRouterPostProcessingReasoningEffort,
+                    this.profile.openRouterPostProcessingReasoningEffort,
                     async (value) => {
-                        this.plugin.settings.openRouterPostProcessingReasoningEffort =
-                            value;
+                        this.profile.openRouterPostProcessingReasoningEffort = value;
                         await this.plugin.saveSettings();
                     },
                 );
@@ -428,12 +550,11 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                 .addText((text) =>
                     text
                         .setValue(
-                            this.plugin.settings.geminiPostProcessingModel,
+                            this.profile.geminiPostProcessingModel,
                         )
                         .setPlaceholder("gemini-2.0-flash")
                         .onChange(async (value) => {
-                            this.plugin.settings.geminiPostProcessingModel =
-                                value;
+                            this.profile.geminiPostProcessingModel = value;
                             await this.plugin.saveSettings();
                         }),
                 );
@@ -447,12 +568,12 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             )
             .addTextArea((textArea) =>
                 textArea
-                    .setValue(this.plugin.settings.postProcessingPrompt)
+                    .setValue(this.profile.postProcessingPrompt)
                     .setPlaceholder(
                         "Summarize this transcript:\n\n{{transcript}}",
                     )
                     .onChange(async (value) => {
-                        this.plugin.settings.postProcessingPrompt = value;
+                        this.profile.postProcessingPrompt = value;
                         await this.plugin.saveSettings();
                     })
                     .inputEl.setCssStyles({
@@ -464,15 +585,14 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         promptSetting.settingEl.setCssStyles({ alignItems: "initial" });
         promptSetting.infoEl.setCssStyles({ maxWidth: "30%" });
 
-        if (this.plugin.settings.provider === "openrouter") {
+        if (this.profile.provider === "openrouter") {
             this.renderProviderRanking(containerEl, true);
         }
     }
 
     private renderOpenRouterPostProcessingModel(containerEl: HTMLElement) {
         const cache = this.plugin.settings.openRouterPostProcessingModelCache;
-        const selectedModel =
-            this.plugin.settings.openRouterPostProcessingModel;
+        const selectedModel = this.profile.openRouterPostProcessingModel;
         const info = cache?.models.find((model) => model.id === selectedModel);
         let desc = selectedModel
             ? `Selected: ${info?.name ?? selectedModel} (${selectedModel}).`
@@ -618,9 +738,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         }
 
         new OpenRouterModelSuggestModal(this.app, models, async (model) => {
-            this.plugin.settings.openRouterPostProcessingModel = model.id;
-            this.plugin.settings.openRouterPostProcessingProviders = [];
-            this.plugin.settings.openRouterPostProcessingReasoningEffort =
+            this.profile.openRouterPostProcessingModel = model.id;
+            this.profile.openRouterPostProcessingProviders = [];
+            this.profile.openRouterPostProcessingReasoningEffort =
                 this.initialReasoningEffort(model);
             await this.plugin.saveSettings();
             void this.loadProviderOptions(model.id, true);
@@ -641,19 +761,17 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             const selectedModel = models.find(
                 (model) =>
                     model.id ===
-                    this.plugin.settings.openRouterPostProcessingModel,
+                    this.profile.openRouterPostProcessingModel,
             );
             const currentEffort =
-                this.plugin.settings.openRouterPostProcessingReasoningEffort;
+                this.profile.openRouterPostProcessingReasoningEffort;
             if (selectedModel?.reasoningEfforts?.length === 1) {
-                this.plugin.settings.openRouterPostProcessingReasoningEffort =
-                    selectedModel.reasoningEfforts[0];
+                this.profile.openRouterPostProcessingReasoningEffort = selectedModel.reasoningEfforts[0];
             } else if (
                 currentEffort &&
                 !selectedModel?.reasoningEfforts?.includes(currentEffort)
             ) {
-                this.plugin.settings.openRouterPostProcessingReasoningEffort =
-                    "";
+                this.profile.openRouterPostProcessingReasoningEffort = "";
             }
             await this.plugin.saveSettings();
 
@@ -690,8 +808,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         }
 
         const selectedModel = postProcessing
-            ? this.plugin.settings.openRouterPostProcessingModel
-            : this.plugin.settings.openRouterModel;
+            ? this.profile.openRouterPostProcessingModel
+            : this.profile.openRouterModel;
         if (!selectedModel) {
             rankingSetting.setDesc(
                 "Select a model first to configure the provider ranking.",
@@ -700,8 +818,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         }
 
         const providers = postProcessing
-            ? this.plugin.settings.openRouterPostProcessingProviders
-            : this.plugin.settings.openRouterProviders;
+            ? this.profile.openRouterPostProcessingProviders
+            : this.profile.openRouterProviders;
 
         providers.forEach((provider, index) => {
             new Setting(containerEl)
@@ -796,8 +914,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
 
     private moveProvider(from: number, to: number, postProcessing = false) {
         const currentProviders = postProcessing
-            ? this.plugin.settings.openRouterPostProcessingProviders
-            : this.plugin.settings.openRouterProviders;
+            ? this.profile.openRouterPostProcessingProviders
+            : this.profile.openRouterProviders;
         const providers = [...currentProviders];
         const moved = providers[from];
         providers[from] = providers[to];
@@ -809,9 +927,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
 
     private setProviderRanking(providers: string[], postProcessing: boolean) {
         if (postProcessing) {
-            this.plugin.settings.openRouterPostProcessingProviders = providers;
+            this.profile.openRouterPostProcessingProviders = providers;
         } else {
-            this.plugin.settings.openRouterProviders = providers;
+            this.profile.openRouterProviders = providers;
         }
     }
 
@@ -833,12 +951,12 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         }
 
         new OpenRouterModelSuggestModal(this.app, models, async (model) => {
-            this.plugin.settings.openRouterModel = model.id;
-            this.plugin.settings.openRouterModelIsStt = model.isStt;
-            this.plugin.settings.openRouterReasoningEffort = model.isStt
+            this.profile.openRouterModel = model.id;
+            this.profile.openRouterModelIsStt = model.isStt;
+            this.profile.openRouterReasoningEffort = model.isStt
                 ? ""
                 : this.initialReasoningEffort(model);
-            this.plugin.settings.openRouterProviders = [];
+            this.profile.openRouterProviders = [];
             await this.plugin.saveSettings();
             void this.loadProviderOptions(model.id);
             this.display();
@@ -856,18 +974,17 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             };
 
             const selectedModel = models.find(
-                (model) => model.id === this.plugin.settings.openRouterModel,
+                (model) => model.id === this.profile.openRouterModel,
             );
             const currentEffort =
-                this.plugin.settings.openRouterReasoningEffort;
+                this.profile.openRouterReasoningEffort;
             if (selectedModel?.reasoningEfforts?.length === 1) {
-                this.plugin.settings.openRouterReasoningEffort =
-                    selectedModel.reasoningEfforts[0];
+                this.profile.openRouterReasoningEffort = selectedModel.reasoningEfforts[0];
             } else if (
                 currentEffort &&
                 !selectedModel?.reasoningEfforts?.includes(currentEffort)
             ) {
-                this.plugin.settings.openRouterReasoningEffort = "";
+                this.profile.openRouterReasoningEffort = "";
             }
             await this.plugin.saveSettings();
 
@@ -1024,20 +1141,20 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             .setName("Custom prompt")
             .setHeading()
             .setDesc(
-                "Show and edit the prompt that gets passed to gemini with your audio file. Enabling this setting will disable the language setting (you can set it manually in the prompt).",
+                "Edit the instructions sent with the audio. Enabling this setting disables the separate language field, which can then be specified in the prompt.",
             )
             .addToggle((toggle) =>
                 toggle
-                    .setValue(this.plugin.settings.customPrompt)
+                    .setValue(this.profile.customPrompt)
                     .onChange(async (value) => {
-                        this.plugin.settings.customPrompt = value;
+                        this.profile.customPrompt = value;
                         this.completePrompt();
                         await this.plugin.saveSettings();
                         this.display();
                     }),
             );
 
-        if (this.plugin.settings.customPrompt) {
+        if (this.profile.customPrompt) {
             customPrompt.descEl.createEl("br");
             customPrompt.descEl.createEl("br");
             customPrompt.descEl
@@ -1047,7 +1164,7 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                 .setCssStyles({ color: "red" });
         }
 
-        if (this.plugin.settings.customPrompt) {
+        if (this.profile.customPrompt) {
             const promptSetting = new Setting(containerEl)
                 .setName("Prompt")
                 .setClass("indent-setting")
@@ -1056,9 +1173,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                 )
                 .addTextArea((textArea) =>
                     textArea
-                        .setValue(this.plugin.settings.prompt)
+                        .setValue(this.profile.prompt)
                         .onChange(async (value) => {
-                            this.plugin.settings.prompt = value;
+                            this.profile.prompt = value;
                             await this.plugin.saveSettings();
                         })
                         .inputEl.setCssStyles({

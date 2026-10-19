@@ -6,6 +6,7 @@ import {
 } from "@google/genai";
 import GeminiTranscriberPlugin from "main";
 import { Notice } from "obsidian";
+import type { TranscriptionProfile } from "../settings";
 import {
     createPostProcessingPrompt,
     TranscriptionProvider,
@@ -15,14 +16,12 @@ export class GeminiProvider implements TranscriptionProvider {
     readonly displayName = "Gemini";
 
     private plugin: GeminiTranscriberPlugin;
+    private profile: TranscriptionProfile;
     private ai: GoogleGenAI | undefined;
 
-    constructor(plugin: GeminiTranscriberPlugin) {
+    constructor(plugin: GeminiTranscriberPlugin, profile: TranscriptionProfile) {
         this.plugin = plugin;
-        this.reloadApiKey();
-    }
-
-    reloadApiKey() {
+        this.profile = profile;
         const apiKey = this.plugin.app.secretStorage.getSecret(
             this.plugin.settings.geminiApiKeySecretName,
         );
@@ -59,13 +58,13 @@ export class GeminiProvider implements TranscriptionProvider {
     }
 
     async postProcess(transcript: string): Promise<string> {
-        const model = this.plugin.settings.geminiPostProcessingModel.trim();
+        const model = this.profile.geminiPostProcessingModel.trim();
         if (!model) {
             throw new Error("No Gemini post-processing model selected.");
         }
 
         const prompt = createPostProcessingPrompt(
-            this.plugin.settings.postProcessingPrompt,
+            this.profile.postProcessingPrompt,
             transcript,
         );
         const response = await this.ai!.models.generateContent({
@@ -82,12 +81,12 @@ export class GeminiProvider implements TranscriptionProvider {
 
     private async getResponse(uploadedFile: File) {
         return await this.ai!.models.generateContent({
-            model: this.plugin.settings.modelName,
+            model: this.profile.modelName,
             contents: createUserContent([
                 // file was uploaded before so it has a uri and mimeType
                 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 createPartFromUri(uploadedFile.uri!, uploadedFile.mimeType!),
-                this.plugin.settings.prompt,
+                this.profile.prompt,
             ]),
         });
     }

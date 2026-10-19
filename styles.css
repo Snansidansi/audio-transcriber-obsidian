@@ -1,3 +1,44 @@
 .indent-setting {
     padding-left: 1rem;
 }
+
+.audio-transcriber-settings-tabs {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    padding: 0 0 0.35rem;
+    border-bottom: 1px solid var(--background-modifier-border);
+    scrollbar-width: thin;
+}
+
+.audio-transcriber-settings-tabs button {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.75rem;
+    border: 0;
+    border-radius: var(--button-radius);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.audio-transcriber-settings-tabs button:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.audio-transcriber-settings-tabs button.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.audio-transcriber-settings-content {
+    min-width: 0;
+}
+
+@media (max-width: 600px) {
+    .audio-transcriber-settings .setting-item-control {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+}

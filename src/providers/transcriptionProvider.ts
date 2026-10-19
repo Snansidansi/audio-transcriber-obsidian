@@ -1,8 +1,6 @@
 export interface TranscriptionProvider {
     readonly displayName: string;
 
-    reloadApiKey(): void;
-
     isConfigured(): boolean;
 
     /**

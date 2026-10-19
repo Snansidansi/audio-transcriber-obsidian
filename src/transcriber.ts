@@ -5,6 +5,7 @@ import { OpenRouterProvider } from "./providers/openRouterProvider";
 import { TranscriptionProvider } from "./providers/transcriptionProvider";
 import { ResponseHandler } from "./responseHandler";
 import type { InsertionTarget } from "./insertionTarget";
+import type { TranscriptionProfile } from "./settings";
 
 type TranscriptionPhase = "processing" | "post-processing";
 
@@ -21,27 +22,13 @@ export class Transcriber {
     ] as const;
 
     private plugin: GeminiTranscriberPlugin;
-    private provider: TranscriptionProvider;
     private responseHandler: ResponseHandler;
     private nextTranscriptionId = 0;
     private transcriptionPhases = new Map<number, TranscriptionPhase>();
 
     constructor(plugin: GeminiTranscriberPlugin) {
         this.plugin = plugin;
-        this.provider = this.createProvider();
         this.responseHandler = new ResponseHandler(plugin);
-    }
-
-    reloadApiKey() {
-        this.provider.reloadApiKey();
-    }
-
-    reloadProvider() {
-        this.provider = this.createProvider();
-    }
-
-    getProvider(): TranscriptionProvider {
-        return this.provider;
     }
 
     getTranscriptionCounts() {
@@ -79,14 +66,21 @@ export class Transcriber {
         }
     }
 
-    captureInsertionTarget(toClipboard: boolean): InsertionTarget {
+    captureInsertionTarget(
+        toClipboard: boolean,
+        profile = this.plugin.getProfileSnapshot(),
+    ): InsertionTarget {
         if (toClipboard) {
             return { kind: "clipboard" };
         }
 
         const activeEditor = this.plugin.app.workspace.activeEditor;
         const file = this.plugin.app.workspace.getActiveFile();
-        if (!this.provider.isConfigured() || !activeEditor?.editor || !file) {
+        if (
+            !this.createProvider(profile).isConfigured() ||
+            !activeEditor?.editor ||
+            !file
+        ) {
             return { kind: "transcript-file" };
         }
 
@@ -106,11 +100,13 @@ export class Transcriber {
         blob: Blob,
         filename: string | undefined,
         target: InsertionTarget,
+        profile = this.plugin.getProfileSnapshot(),
     ) {
-        if (!this.provider.isConfigured()) {
+        const provider = this.createProvider(profile);
+        if (!provider.isConfigured()) {
             await this.responseHandler.removeAnchor(target);
             new Notice(
-                `Error: No API key configured for ${this.provider.displayName}.`,
+                `Error: No API key configured for ${provider.displayName}.`,
                 0,
             );
             return;
@@ -120,14 +116,14 @@ export class Transcriber {
         let targetHandled = target.kind !== "editor-anchor";
 
         try {
-            const transcript = await this.provider.transcribe(blob);
+            const transcript = await provider.transcribe(blob);
             let finalTranscript = transcript;
             let statisticsTranscript = transcript;
 
-            if (this.plugin.settings.enablePostProcessing && transcript.trim()) {
+            if (profile.enablePostProcessing && transcript.trim()) {
                 this.beginPostProcessing(transcriptionId);
                 try {
-                    finalTranscript = await this.provider.postProcess(transcript);
+                    finalTranscript = await provider.postProcess(transcript);
                     statisticsTranscript = finalTranscript;
                     this.plugin.statistics?.addPostProcessingWords(
                         finalTranscript,
@@ -156,7 +152,7 @@ export class Transcriber {
             if (error instanceof Error) {
                 if (error.message.contains("API key not valid")) {
                     new Notice(
-                        `Error: Your API key for ${this.provider.displayName} is invalid.`,
+                        `Error: Your API key for ${provider.displayName} is invalid.`,
                         0,
                     );
                     return;
@@ -173,12 +169,12 @@ export class Transcriber {
         }
     }
 
-    private createProvider(): TranscriptionProvider {
-        if (this.plugin.settings.provider === "openrouter") {
-            return new OpenRouterProvider(this.plugin);
+    private createProvider(profile: TranscriptionProfile): TranscriptionProvider {
+        if (profile.provider === "openrouter") {
+            return new OpenRouterProvider(this.plugin, profile);
         }
 
-        return new GeminiProvider(this.plugin);
+        return new GeminiProvider(this.plugin, profile);
     }
 
     private appendPostProcessingFailure(

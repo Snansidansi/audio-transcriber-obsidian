@@ -100,7 +100,11 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
                 return;
             }
 
-            const target = plugin.transcriber.captureInsertionTarget(false);
+            const profile = plugin.getProfileSnapshot();
+            const target = plugin.transcriber.captureInsertionTarget(
+                false,
+                profile,
+            );
 
             const extension = selectedFile.name
                 .slice(selectedFile.name.lastIndexOf(".") + 1)
@@ -111,7 +115,7 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
                 type: "audio/" + extension,
             });
 
-            plugin.transcriber.transcribe(blob, selectedFile.name, target);
+            plugin.transcriber.transcribe(blob, selectedFile.name, target, profile);
         },
     });
 }

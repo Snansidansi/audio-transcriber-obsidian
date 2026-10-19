@@ -1,6 +1,7 @@
 import GeminiTranscriberPlugin from "main";
 import { normalizePath, Notice } from "obsidian";
 import type { InsertionTarget } from "./insertionTarget";
+import type { TranscriptionProfile } from "./settings";
 
 export class AudioRecorder {
     private plugin: GeminiTranscriberPlugin;
@@ -8,6 +9,7 @@ export class AudioRecorder {
     private mediaRecorder: MediaRecorder | null = null;
     private abort = false;
     private insertionTarget: InsertionTarget | null = null;
+    private recordingProfile: TranscriptionProfile | null = null;
 
     private static mimeType = "audio/webm; codecs=opus";
 
@@ -21,10 +23,13 @@ export class AudioRecorder {
         }
     }
 
-    async startRecording() {
+    async startRecording(profile = this.plugin.getActiveProfile()) {
         if (this.abort) {
             return;
         }
+
+        const profileSnapshot = this.plugin.getProfileSnapshot(profile);
+        this.recordingProfile = profileSnapshot;
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -37,6 +42,7 @@ export class AudioRecorder {
             const errMsg = `A getUserMedia error occured: ${error}`;
             console.log(errMsg);
             new Notice(errMsg, 0);
+            this.recordingProfile = null;
             return;
         }
 
@@ -52,6 +58,7 @@ export class AudioRecorder {
         this.mediaRecorder.start();
         this.insertionTarget = this.plugin.transcriber.captureInsertionTarget(
             this.plugin.settings.saveToClipBoard,
+            profileSnapshot,
         );
         this.plugin.statusBar?.setStatus("recording");
     }
@@ -91,6 +98,7 @@ export class AudioRecorder {
         this.abort = true;
         void this.plugin.transcriber.discardInsertionTarget(this.insertionTarget);
         this.insertionTarget = null;
+        this.recordingProfile = null;
         this.mediaRecorder.stop();
     }
 
@@ -104,6 +112,7 @@ export class AudioRecorder {
 
         if (this.abort) {
             this.insertionTarget = null;
+            this.recordingProfile = null;
             this.plugin.statusBar?.setStatus("ready");
             this.abort = false;
             return;
@@ -111,6 +120,8 @@ export class AudioRecorder {
 
         const insertionTarget = this.insertionTarget;
         this.insertionTarget = null;
+        const profile = this.recordingProfile ?? this.plugin.getProfileSnapshot();
+        this.recordingProfile = null;
 
         let handedOff = false;
         try {
@@ -134,6 +145,7 @@ export class AudioRecorder {
                 blob,
                 fileName,
                 insertionTarget ?? { kind: "transcript-file" },
+                profile,
             );
             handedOff = true;
         } catch (error) {

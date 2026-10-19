@@ -1,6 +1,7 @@
 import GeminiTranscriberPlugin from "main";
 import { requestUrl, RequestUrlResponse } from "obsidian";
 import { OPENROUTER_API_BASE } from "../openRouterApi";
+import type { TranscriptionProfile } from "../settings";
 import {
     createPostProcessingPrompt,
     TranscriptionProvider,
@@ -221,14 +222,12 @@ export class OpenRouterProvider implements TranscriptionProvider {
     readonly displayName = "OpenRouter";
 
     private plugin: GeminiTranscriberPlugin;
+    private profile: TranscriptionProfile;
     private apiKey: string | undefined;
 
-    constructor(plugin: GeminiTranscriberPlugin) {
+    constructor(plugin: GeminiTranscriberPlugin, profile: TranscriptionProfile) {
         this.plugin = plugin;
-        this.reloadApiKey();
-    }
-
-    reloadApiKey() {
+        this.profile = profile;
         const apiKey = this.plugin.app.secretStorage.getSecret(
             this.plugin.settings.openRouterApiKeySecretName,
         );
@@ -245,13 +244,13 @@ export class OpenRouterProvider implements TranscriptionProvider {
     }
 
     async transcribe(blob: Blob): Promise<string> {
-        if (!this.plugin.settings.openRouterModel) {
+        if (!this.profile.openRouterModel) {
             throw new Error(
                 "No OpenRouter model selected. Choose one in the settings.",
             );
         }
 
-        if (this.plugin.settings.openRouterModelIsStt) {
+        if (this.profile.openRouterModelIsStt) {
             return await this.transcribeWithSttModel(blob);
         }
 
@@ -259,13 +258,13 @@ export class OpenRouterProvider implements TranscriptionProvider {
     }
 
     async postProcess(transcript: string): Promise<string> {
-        const model = this.plugin.settings.openRouterPostProcessingModel.trim();
+        const model = this.profile.openRouterPostProcessingModel.trim();
         if (!model) {
             throw new Error("No OpenRouter post-processing model selected.");
         }
 
         const prompt = createPostProcessingPrompt(
-            this.plugin.settings.postProcessingPrompt,
+            this.profile.postProcessingPrompt,
             transcript,
         );
         const request: Record<string, unknown> = {
@@ -273,14 +272,14 @@ export class OpenRouterProvider implements TranscriptionProvider {
             messages: [{ role: "user", content: prompt }],
         };
 
-        if (this.plugin.settings.openRouterPostProcessingProviders.length > 0) {
+        if (this.profile.openRouterPostProcessingProviders.length > 0) {
             request.provider = {
-                order: this.plugin.settings.openRouterPostProcessingProviders,
+                order: this.profile.openRouterPostProcessingProviders,
             };
         }
 
         const reasoningEffort =
-            this.plugin.settings.openRouterPostProcessingReasoningEffort;
+            this.profile.openRouterPostProcessingReasoningEffort;
         if (reasoningEffort) {
             request.reasoning = { effort: reasoningEffort };
         }
@@ -307,7 +306,7 @@ export class OpenRouterProvider implements TranscriptionProvider {
         const wav = await convertToWav(blob);
 
         const request: Record<string, unknown> = {
-            model: this.plugin.settings.openRouterModel,
+            model: this.profile.openRouterModel,
             messages: [
                 {
                     role: "user",
@@ -321,7 +320,7 @@ export class OpenRouterProvider implements TranscriptionProvider {
                         },
                         {
                             type: "text",
-                            text: this.plugin.settings.prompt,
+                            text: this.profile.prompt,
                         },
                     ],
                 },
@@ -329,14 +328,14 @@ export class OpenRouterProvider implements TranscriptionProvider {
         };
 
         const reasoningEffort =
-            this.plugin.settings.openRouterReasoningEffort;
+            this.profile.openRouterReasoningEffort;
         if (reasoningEffort) {
             request.reasoning = { effort: reasoningEffort };
         }
 
-        if (this.plugin.settings.openRouterProviders.length > 0) {
+        if (this.profile.openRouterProviders.length > 0) {
             request.provider = {
-                order: this.plugin.settings.openRouterProviders,
+                order: this.profile.openRouterProviders,
             };
         }
 
@@ -370,14 +369,14 @@ export class OpenRouterProvider implements TranscriptionProvider {
         }
 
         const request: Record<string, unknown> = {
-            model: this.plugin.settings.openRouterModel,
+            model: this.profile.openRouterModel,
             input_audio: {
                 data: arrayBufferToBase64(audio),
                 format: audioFormat,
             },
         };
 
-        const language = languageToIsoCode(this.plugin.settings.language);
+        const language = languageToIsoCode(this.profile.language);
         if (language) {
             request.language = language;
         }
