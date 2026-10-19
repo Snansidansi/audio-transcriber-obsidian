@@ -8,6 +8,7 @@ export class AudioRecorder {
     private chunks: Blob[] = [];
     private mediaRecorder: MediaRecorder | null = null;
     private abort = false;
+    private starting = false;
     private insertionTarget: InsertionTarget | null = null;
     private recordingProfile: TranscriptionProfile | null = null;
 
@@ -23,11 +24,16 @@ export class AudioRecorder {
         }
     }
 
+    isStarting(): boolean {
+        return this.starting;
+    }
+
     async startRecording(profile = this.plugin.getActiveProfile()) {
-        if (this.abort) {
+        if (this.abort || this.starting || this.mediaRecorder) {
             return;
         }
 
+        this.starting = true;
         const profileSnapshot = this.plugin.getProfileSnapshot(profile);
         this.recordingProfile = profileSnapshot;
 
@@ -42,10 +48,12 @@ export class AudioRecorder {
             const errMsg = `A getUserMedia error occured: ${error}`;
             console.log(errMsg);
             new Notice(errMsg, 0);
+            this.starting = false;
             this.recordingProfile = null;
             return;
         }
 
+        this.starting = false;
         this.mediaRecorder.ondataavailable = (e) => {
             this.chunks.push(e.data);
         };

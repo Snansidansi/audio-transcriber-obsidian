@@ -2,7 +2,7 @@
     "id": "audio-transcriber",
     "name": "Audio Transcriber",
     "version": "1.2.1",
-    "minAppVersion": "0.15.0",
+    "minAppVersion": "1.7.2",
     "description": "Transcribe live audio recordings or existing files using Gemini or OpenRouter.",
     "author": "Snansidansi",
     "isDesktopOnly": false

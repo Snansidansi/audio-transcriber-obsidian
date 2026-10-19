@@ -118,4 +118,60 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
             plugin.transcriber.transcribe(blob, selectedFile.name, target, profile);
         },
     });
+
+    syncProfileCommands(plugin);
+}
+
+export function syncProfileCommands(plugin: GeminiTranscriberPlugin): void {
+    const profiles = new Map(
+        plugin.settings.profiles.map((profile) => [profile.id, profile]),
+    );
+
+    for (const [profileId, registered] of plugin.profileCommands) {
+        const profile = profiles.get(profileId);
+        if (profile && profile.name === registered.name) {
+            continue;
+        }
+
+        plugin.removeCommand(registered.commandId);
+        plugin.profileCommands.delete(profileId);
+    }
+
+    for (const profile of profiles.values()) {
+        const registered = plugin.profileCommands.get(profile.id);
+        if (registered?.name === profile.name) {
+            continue;
+        }
+
+        const commandId = `start-stop-recording-profile-${profile.id}`;
+        const name = `Start recording with profile: ${profile.name}`;
+
+        plugin.addCommand({
+            id: commandId,
+            name,
+            icon: "mic",
+            callback: () => {
+                const currentProfile = plugin.settings.profiles.find(
+                    (item) => item.id === profile.id,
+                );
+                if (!currentProfile) {
+                    return;
+                }
+
+                if (
+                    plugin.audioRecorder.isStarting() ||
+                    plugin.audioRecorder.getState() !== undefined
+                ) {
+                    new Notice(
+                        "Stop the current recording before starting this profile.",
+                    );
+                    return;
+                }
+
+                void plugin.audioRecorder.startRecording(currentProfile);
+            },
+        });
+
+        plugin.profileCommands.set(profile.id, { commandId, name: profile.name });
+    }
 }

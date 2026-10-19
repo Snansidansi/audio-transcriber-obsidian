@@ -200,7 +200,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
     private renderProfileControls(containerEl: HTMLElement) {
         new Setting(containerEl)
             .setName("Transcription profile")
-            .setDesc("Profile for models, prompts, and post-processing.")
+            .setDesc(
+                "Profile for models, prompts, and post-processing. Each profile adds a start command in Obsidian Hotkeys; use the general Start/Stop command to stop.",
+            )
             .addDropdown((dropdown) => {
                 for (const profile of this.plugin.settings.profiles) {
                     dropdown.addOption(profile.id, profile.name);
@@ -225,6 +227,7 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                     this.plugin.settings.profiles.push(newProfile);
                     this.plugin.settings.activeProfileId = newProfile.id;
                     await this.plugin.saveSettings();
+                    this.plugin.syncProfileCommands();
                     this.display();
                 }),
             )
@@ -236,6 +239,7 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                     this.plugin.settings.profiles.push(copied);
                     this.plugin.settings.activeProfileId = copied.id;
                     await this.plugin.saveSettings();
+                    this.plugin.syncProfileCommands();
                     this.display();
                 }),
             )
@@ -254,18 +258,22 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                         this.plugin.settings.activeProfileId =
                             this.plugin.settings.profiles[0].id;
                         await this.plugin.saveSettings();
+                        this.plugin.syncProfileCommands();
                         this.display();
                     }),
             );
 
         new Setting(containerEl)
             .setName("Profile name")
-            .addText((text) =>
-                text.setValue(this.profile.name).onChange(async (value) => {
+            .addText((text) => {
+                text.inputEl.addEventListener("blur", () => {
+                    this.plugin.syncProfileCommands();
+                });
+                return text.setValue(this.profile.name).onChange(async (value) => {
                     this.profile.name = value.trim() || "Profile";
                     await this.plugin.saveSettings();
-                }),
-            );
+                });
+            });
     }
 
     private newProfileId(): string {

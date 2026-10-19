@@ -1,4 +1,4 @@
-import { addCommands } from "src/commands";
+import { addCommands, syncProfileCommands } from "src/commands";
 import { Plugin } from "obsidian";
 import { AudioRecorder } from "src/audioRecorder";
 import {
@@ -20,6 +20,7 @@ export default class GeminiTranscriberPlugin extends Plugin {
     settings: GeminiTranscriberSettings;
     transcriber: Transcriber;
     statistics: Statistics | undefined;
+    profileCommands = new Map<string, { commandId: string; name: string }>();
 
     async onload() {
         await this.loadSettings();
@@ -128,6 +129,10 @@ export default class GeminiTranscriberPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+
+    syncProfileCommands() {
+        syncProfileCommands(this);
     }
 
     private addRibbonIcons() {
