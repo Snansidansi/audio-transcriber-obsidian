@@ -10,6 +10,7 @@ The Audio Transcriber plugin for Obsidian converts audio files or live recording
 - Transcribe audio files from your vault and anywhere from disk
 - Embed recordings above the transcription
 - Choose Gemini or OpenRouter models
+- Create transcription profiles with their own models, prompts, and post-processing settings
 - View plugin usage statistics (can be completely disabled in the settings)
 
 ## Installation
@@ -22,7 +23,7 @@ The Audio Transcriber plugin for Obsidian converts audio files or live recording
 
 1. Select Gemini or OpenRouter in the plugin settings and enter the corresponding API key. [Generate a Gemini key](https://aistudio.google.com/apikey) or [create an OpenRouter key](https://openrouter.ai/keys).
 2. Select a model and enter the language of your audio.
-3. Optionally, add hotkeys for available plugin commands such as starting/stopping or pausing/resuming a recording.
+3. Optionally, add hotkeys for available plugin commands, including a dedicated start command for each transcription profile.
 4. Press your hotkey for start/stop or use the command from the command palette to use the plugin.
 
 ## Compatible file types
