@@ -6,6 +6,8 @@ import { TranscriptionProvider } from "./providers/transcriptionProvider";
 import { ResponseHandler } from "./responseHandler";
 import type { InsertionTarget } from "./insertionTarget";
 
+type TranscriptionPhase = "processing" | "post-processing";
+
 export class Transcriber {
     static validFileFormats = [
         "wav",
@@ -21,6 +23,8 @@ export class Transcriber {
     private plugin: GeminiTranscriberPlugin;
     private provider: TranscriptionProvider;
     private responseHandler: ResponseHandler;
+    private nextTranscriptionId = 0;
+    private transcriptionPhases = new Map<number, TranscriptionPhase>();
 
     constructor(plugin: GeminiTranscriberPlugin) {
         this.plugin = plugin;
@@ -38,6 +42,41 @@ export class Transcriber {
 
     getProvider(): TranscriptionProvider {
         return this.provider;
+    }
+
+    getTranscriptionCounts() {
+        let processing = 0;
+        let postProcessing = 0;
+
+        for (const phase of this.transcriptionPhases.values()) {
+            if (phase === "processing") {
+                processing++;
+            } else {
+                postProcessing++;
+            }
+        }
+
+        return { processing, postProcessing };
+    }
+
+    private beginTranscription(): number {
+        const id = ++this.nextTranscriptionId;
+        this.transcriptionPhases.set(id, "processing");
+        this.plugin.statusBar?.reloadStatus();
+        return id;
+    }
+
+    private beginPostProcessing(id: number) {
+        if (this.transcriptionPhases.has(id)) {
+            this.transcriptionPhases.set(id, "post-processing");
+            this.plugin.statusBar?.reloadStatus();
+        }
+    }
+
+    private endTranscription(id: number) {
+        if (this.transcriptionPhases.delete(id)) {
+            this.plugin.statusBar?.reloadStatus();
+        }
     }
 
     captureInsertionTarget(toClipboard: boolean): InsertionTarget {
@@ -77,7 +116,7 @@ export class Transcriber {
             return;
         }
 
-        this.plugin.statusBar?.setStatus("processing");
+        const transcriptionId = this.beginTranscription();
         let targetHandled = target.kind !== "editor-anchor";
 
         try {
@@ -86,6 +125,7 @@ export class Transcriber {
             let statisticsTranscript = transcript;
 
             if (this.plugin.settings.enablePostProcessing && transcript.trim()) {
+                this.beginPostProcessing(transcriptionId);
                 try {
                     finalTranscript = await this.provider.postProcess(transcript);
                     statisticsTranscript = finalTranscript;
@@ -129,7 +169,7 @@ export class Transcriber {
             if (!targetHandled) {
                 await this.responseHandler.removeAnchor(target);
             }
-            this.plugin.statusBar?.setStatus("ready");
+            this.endTranscription(transcriptionId);
         }
     }
 

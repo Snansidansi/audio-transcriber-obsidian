@@ -79,7 +79,7 @@ export class AudioRecorder {
             return;
         }
 
-        this.plugin.statusBar?.setStatus("processing");
+        this.plugin.statusBar?.setStatus("ready");
         this.mediaRecorder.stop();
     }
 

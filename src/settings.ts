@@ -52,6 +52,7 @@ export interface GeminiTranscriberSettings {
     statusbarColorRecording: string;
     statusbarColorPause: string;
     statusbarColorProcessing: string;
+    statusbarColorPostProcessing: string;
     enableStatistics: boolean;
     saveToClipBoard: boolean;
 }
@@ -88,6 +89,7 @@ export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
     statusbarColorRecording: "#ff0000",
     statusbarColorPause: "#ffff00",
     statusbarColorProcessing: "#ffa500",
+    statusbarColorPostProcessing: "#9b59b6",
     enableStatistics: true,
     saveToClipBoard: false,
 };
@@ -125,6 +127,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         this.plugin.settings.statusbarColorProcessing =
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             DEFAULT_SETTINGS.statusbarColorProcessing!;
+        this.plugin.settings.statusbarColorPostProcessing =
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            DEFAULT_SETTINGS.statusbarColorPostProcessing!;
     }
 
     private isSttSelected(): boolean {
@@ -990,6 +995,22 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                         .setValue(this.plugin.settings.statusbarColorProcessing)
                         .onChange(async (value) => {
                             this.plugin.settings.statusbarColorProcessing =
+                                value;
+                            await this.plugin.saveSettings();
+                            this.plugin.statusBar?.reloadStatus();
+                        });
+                });
+
+            new Setting(containerEl)
+                .setName("Post-processing color")
+                .setClass("indent-setting")
+                .addColorPicker((color) => {
+                    color
+                        .setValue(
+                            this.plugin.settings.statusbarColorPostProcessing,
+                        )
+                        .onChange(async (value) => {
+                            this.plugin.settings.statusbarColorPostProcessing =
                                 value;
                             await this.plugin.saveSettings();
                             this.plugin.statusBar?.reloadStatus();
