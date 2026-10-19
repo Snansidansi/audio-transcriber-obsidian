@@ -1,5 +1,6 @@
 import GeminiTranscriberPlugin from "main";
-import { normalizePath, Notice } from "obsidian";
+import { MarkdownView, normalizePath, Notice } from "obsidian";
+import type { InsertionTarget } from "./insertionTarget";
 
 export class ResponseHandler {
     private plugin: GeminiTranscriberPlugin;
@@ -11,24 +12,42 @@ export class ResponseHandler {
     async handleResponse(
         transcript: string,
         audioFilename: string | undefined,
-        toClipboard: boolean,
+        target: InsertionTarget,
         statisticsTranscript = transcript,
     ) {
         if (!transcript) {
+            await this.removeAnchor(target);
             return;
         }
 
         this.plugin.statistics?.addWordsRecieved(statisticsTranscript);
         await this.plugin.statistics?.save();
 
-        if (toClipboard) {
+        if (target.kind === "clipboard") {
             this.saveTranscriptInClipboard(transcript);
             new Notice("Stored transcription in clipboard");
             return;
         }
 
-        this.insertAtCursor(transcript, audioFilename);
-        this.createTranscriptFile(transcript, audioFilename);
+        if (target.kind === "editor-anchor") {
+            const inserted = await this.replaceAnchor(
+                target,
+                this.getAudioEmbed(audioFilename) + transcript,
+            );
+
+            if (inserted) {
+                new Notice("Finished transcription");
+                return;
+            }
+
+            await this.createTranscriptFile(transcript, audioFilename);
+            new Notice(
+                "Original insertion point was unavailable. Saved transcription as a new file.",
+            );
+            return;
+        }
+
+        await this.createTranscriptFile(transcript, audioFilename);
 
         new Notice("Finished transcription");
     }
@@ -37,16 +56,63 @@ export class ResponseHandler {
         navigator.clipboard.writeText(text);
     }
 
-    private insertAtCursor(text: string, audioFilename: string | undefined) {
-        const editor = this.plugin.app.workspace.activeEditor?.editor;
-        if (!editor) {
+    private async replaceAnchor(
+        target: Extract<InsertionTarget, { kind: "editor-anchor" }>,
+        replacement: string,
+    ): Promise<boolean> {
+        let replaced = false;
+        let hasOpenView = false;
+
+        for (const leaf of this.plugin.app.workspace.getLeavesOfType("markdown")) {
+            const view = leaf.view;
+            if (!(view instanceof MarkdownView) || view.file?.path !== target.file.path) {
+                continue;
+            }
+
+            hasOpenView = true;
+            const editor = view.editor;
+            const markerIndex = editor.getValue().indexOf(target.marker);
+            if (markerIndex >= 0) {
+                editor.replaceRange(
+                    replacement,
+                    editor.offsetToPos(markerIndex),
+                    editor.offsetToPos(markerIndex + target.marker.length),
+                );
+                return true;
+            }
+        }
+
+        if (hasOpenView) {
+            return false;
+        }
+
+        try {
+            await this.plugin.app.vault.process(target.file, (content) => {
+                const markerIndex = content.indexOf(target.marker);
+                if (markerIndex < 0) {
+                    return content;
+                }
+
+                replaced = true;
+                return (
+                    content.slice(0, markerIndex) +
+                    replacement +
+                    content.slice(markerIndex + target.marker.length)
+                );
+            });
+        } catch (error) {
+            console.error("Could not replace transcription insertion anchor", error);
+        }
+
+        return replaced;
+    }
+
+    async removeAnchor(target: InsertionTarget) {
+        if (target.kind !== "editor-anchor") {
             return;
         }
 
-        editor.replaceSelection(this.getAudioEmbed(audioFilename));
-        editor.replaceSelection(text);
-
-        return true;
+        await this.replaceAnchor(target, "");
     }
 
     /**
@@ -69,11 +135,6 @@ export class ResponseHandler {
         text: string,
         audioFilename: string | undefined,
     ) {
-        const editor = this.plugin.app.workspace.activeEditor?.editor;
-        if (editor) {
-            return;
-        }
-
         const content = this.getAudioEmbed(audioFilename) + text;
         const filename = `transcript-${Date.now()}.md`;
 
@@ -92,15 +153,14 @@ export class ResponseHandler {
 
         filepath = normalizePath(filepath + "/" + filename);
 
-        this.plugin.app.vault.create(filepath, content).then((file) => {
-            const recentLeaf = this.plugin.app.workspace.getMostRecentLeaf();
-            if (recentLeaf && recentLeaf.view.getViewType() === "empty") {
-                recentLeaf.openFile(file);
-                return;
-            }
+        const file = await this.plugin.app.vault.create(filepath, content);
+        const recentLeaf = this.plugin.app.workspace.getMostRecentLeaf();
+        if (recentLeaf && recentLeaf.view.getViewType() === "empty") {
+            await recentLeaf.openFile(file);
+            return;
+        }
 
-            const leaf = this.plugin.app.workspace.getLeaf("tab");
-            leaf.openFile(file);
-        });
+        const leaf = this.plugin.app.workspace.getLeaf("tab");
+        await leaf.openFile(file);
     }
 }

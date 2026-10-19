@@ -100,6 +100,8 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
                 return;
             }
 
+            const target = plugin.transcriber.captureInsertionTarget(false);
+
             const extension = selectedFile.name
                 .slice(selectedFile.name.lastIndexOf(".") + 1)
                 .toLowerCase();
@@ -109,7 +111,7 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
                 type: "audio/" + extension,
             });
 
-            plugin.transcriber.transcribe(blob, selectedFile.name, false);
+            plugin.transcriber.transcribe(blob, selectedFile.name, target);
         },
     });
 }

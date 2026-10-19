@@ -1,11 +1,13 @@
 import GeminiTranscriberPlugin from "main";
 import { normalizePath, Notice } from "obsidian";
+import type { InsertionTarget } from "./insertionTarget";
 
 export class AudioRecorder {
     private plugin: GeminiTranscriberPlugin;
     private chunks: Blob[] = [];
     private mediaRecorder: MediaRecorder | null = null;
     private abort = false;
+    private insertionTarget: InsertionTarget | null = null;
 
     private static mimeType = "audio/webm; codecs=opus";
 
@@ -48,6 +50,9 @@ export class AudioRecorder {
 
         this.chunks = [];
         this.mediaRecorder.start();
+        this.insertionTarget = this.plugin.transcriber.captureInsertionTarget(
+            this.plugin.settings.saveToClipBoard,
+        );
         this.plugin.statusBar?.setStatus("recording");
     }
 
@@ -84,6 +89,8 @@ export class AudioRecorder {
         }
 
         this.abort = true;
+        void this.plugin.transcriber.discardInsertionTarget(this.insertionTarget);
+        this.insertionTarget = null;
         this.mediaRecorder.stop();
     }
 
@@ -96,32 +103,49 @@ export class AudioRecorder {
         this.mediaRecorder = null;
 
         if (this.abort) {
+            this.insertionTarget = null;
             this.plugin.statusBar?.setStatus("ready");
             this.abort = false;
             return;
         }
 
-        const blob = new Blob(this.chunks, {
-            type: AudioRecorder.mimeType,
-        });
+        const insertionTarget = this.insertionTarget;
+        this.insertionTarget = null;
 
-        const [filePath, fileName] = await this.getAndCreateSavePath();
-        if (this.plugin.settings.saveAudioFile) {
-            this.plugin.app.vault.createBinary(
-                filePath,
-                await blob.arrayBuffer(),
+        let handedOff = false;
+        try {
+            const blob = new Blob(this.chunks, {
+                type: AudioRecorder.mimeType,
+            });
+
+            const [filePath, fileName] = await this.getAndCreateSavePath();
+            if (this.plugin.settings.saveAudioFile) {
+                this.plugin.app.vault.createBinary(
+                    filePath,
+                    await blob.arrayBuffer(),
+                );
+            }
+
+            await this.plugin.statistics?.addAudioFileDuration(blob);
+            this.plugin.statistics?.incrementRecorded();
+            await this.plugin.statistics?.save();
+
+            this.plugin.transcriber.transcribe(
+                blob,
+                fileName,
+                insertionTarget ?? { kind: "transcript-file" },
             );
+            handedOff = true;
+        } catch (error) {
+            console.error(error);
+            new Notice(error instanceof Error ? error.message : String(error), 0);
+        } finally {
+            if (!handedOff) {
+                await this.plugin.transcriber.discardInsertionTarget(
+                    insertionTarget,
+                );
+            }
         }
-
-        await this.plugin.statistics?.addAudioFileDuration(blob);
-        this.plugin.statistics?.incrementRecorded();
-        await this.plugin.statistics?.save();
-
-        this.plugin.transcriber.transcribe(
-            blob,
-            fileName,
-            this.plugin.settings.saveToClipBoard,
-        );
     }
 
     private async getAndCreateSavePath(): Promise<

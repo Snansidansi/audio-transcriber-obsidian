@@ -4,6 +4,7 @@ import { GeminiProvider } from "./providers/geminiProvider";
 import { OpenRouterProvider } from "./providers/openRouterProvider";
 import { TranscriptionProvider } from "./providers/transcriptionProvider";
 import { ResponseHandler } from "./responseHandler";
+import type { InsertionTarget } from "./insertionTarget";
 
 export class Transcriber {
     static validFileFormats = [
@@ -39,12 +40,36 @@ export class Transcriber {
         return this.provider;
     }
 
+    captureInsertionTarget(toClipboard: boolean): InsertionTarget {
+        if (toClipboard) {
+            return { kind: "clipboard" };
+        }
+
+        const activeEditor = this.plugin.app.workspace.activeEditor;
+        const file = this.plugin.app.workspace.getActiveFile();
+        if (!this.provider.isConfigured() || !activeEditor?.editor || !file) {
+            return { kind: "transcript-file" };
+        }
+
+        const marker = `<!-- audio-transcriber-anchor:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)} -->`;
+        activeEditor.editor.replaceRange(marker, activeEditor.editor.getCursor());
+
+        return { kind: "editor-anchor", file, marker };
+    }
+
+    async discardInsertionTarget(target: InsertionTarget | null) {
+        if (target) {
+            await this.responseHandler.removeAnchor(target);
+        }
+    }
+
     async transcribe(
         blob: Blob,
         filename: string | undefined,
-        toClipboard: boolean,
+        target: InsertionTarget,
     ) {
         if (!this.provider.isConfigured()) {
+            await this.responseHandler.removeAnchor(target);
             new Notice(
                 `Error: No API key configured for ${this.provider.displayName}.`,
                 0,
@@ -53,6 +78,7 @@ export class Transcriber {
         }
 
         this.plugin.statusBar?.setStatus("processing");
+        let targetHandled = target.kind !== "editor-anchor";
 
         try {
             const transcript = await this.provider.transcribe(blob);
@@ -78,9 +104,10 @@ export class Transcriber {
             await this.responseHandler.handleResponse(
                 finalTranscript,
                 filename,
-                toClipboard,
+                target,
                 statisticsTranscript,
             );
+            targetHandled = true;
 
             await this.plugin.statistics?.addTranscribedDuration(blob);
             this.plugin.statistics?.incrementTranscribed();
@@ -99,6 +126,9 @@ export class Transcriber {
                 }
             }
         } finally {
+            if (!targetHandled) {
+                await this.responseHandler.removeAnchor(target);
+            }
             this.plugin.statusBar?.setStatus("ready");
         }
     }

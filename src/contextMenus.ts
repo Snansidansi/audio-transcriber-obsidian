@@ -14,6 +14,9 @@ export function addContextMenus(plugin: GeminiTranscriberPlugin) {
                 item.setTitle("Transcribe audio")
                     .setIcon("microphone-filled")
                     .onClick(async () => {
+                        const target = plugin.transcriber.captureInsertionTarget(
+                            true,
+                        );
                         const fileExtension = file.name.split(".").pop();
                         const mimeType = "audio/" + fileExtension;
 
@@ -28,7 +31,7 @@ export function addContextMenus(plugin: GeminiTranscriberPlugin) {
                             type: mimeType,
                         });
 
-                        plugin.transcriber.transcribe(blob, file.name, true);
+                        plugin.transcriber.transcribe(blob, file.name, target);
                     });
             });
         }),
