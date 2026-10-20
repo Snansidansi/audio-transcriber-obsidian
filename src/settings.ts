@@ -327,14 +327,21 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             this.renderGeminiSettings(containerEl);
         }
 
+        const languageDisabled =
+            this.profile.customPrompt && !this.isSttSelected();
+
         new Setting(containerEl)
-            .setName(`Language ${this.profile.customPrompt ? "(disabled)" : ""}`)
-            .setDesc("Language of the audio recording.")
+            .setName(`Language ${languageDisabled ? "(disabled)" : ""}`)
+            .setDesc(
+                this.isSttSelected()
+                    ? "Language of the audio recording. Sent as the language parameter of the STT model."
+                    : "Language of the audio recording.",
+            )
             .addText((text) =>
                 text
                     .setValue(this.profile.language)
                     .setPlaceholder("english")
-                    .setDisabled(this.profile.customPrompt)
+                    .setDisabled(languageDisabled)
                     .onChange(async (value) => {
                         this.profile.language = value;
                         this.completePrompt();
@@ -1019,6 +1026,9 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             this.profile.openRouterReasoningEffort = model.isStt
                 ? ""
                 : this.initialReasoningEffort(model);
+            if (model.isStt) {
+                this.profile.customPrompt = false;
+            }
             this.profile.openRouterProviders = [];
             await this.plugin.saveSettings();
             void this.loadProviderOptions(model.id);
