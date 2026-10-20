@@ -167,6 +167,21 @@ export class Transcriber {
                     );
                 } catch (error: unknown) {
                     console.log(error);
+                    if (saveAudioOnFailure && !audioSaved) {
+                        try {
+                            await saveAudioOnFailure();
+                            audioSaved = true;
+                        } catch (saveError) {
+                            console.error(
+                                "Could not save audio after post-processing failure",
+                                saveError,
+                            );
+                            new Notice(
+                                "Could not save audio after post-processing failure.",
+                                0,
+                            );
+                        }
+                    }
                     finalTranscript = this.appendPostProcessingFailure(
                         transcript,
                         error,
