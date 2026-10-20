@@ -1,5 +1,9 @@
 import GeminiTranscriberPlugin from "main";
 import { normalizePath, Notice } from "obsidian";
+import {
+    audioExtensionFromMimeType,
+    resolveRecordingFormat,
+} from "./audioFormats";
 import type { InsertionTarget } from "./insertionTarget";
 import type { TranscriptionProfile } from "./settings";
 
@@ -11,8 +15,8 @@ export class AudioRecorder {
     private starting = false;
     private insertionTarget: InsertionTarget | null = null;
     private recordingProfile: TranscriptionProfile | null = null;
-
-    private static mimeType = "audio/webm; codecs=opus";
+    private recordingMimeType = "";
+    private recordingExtension = "";
 
     constructor(plugin: GeminiTranscriberPlugin) {
         this.plugin = plugin;
@@ -37,20 +41,53 @@ export class AudioRecorder {
         const profileSnapshot = this.plugin.getProfileSnapshot(profile);
         this.recordingProfile = profileSnapshot;
 
+        let stream: MediaStream;
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-            });
-            this.mediaRecorder = new MediaRecorder(stream, {
-                mimeType: AudioRecorder.mimeType,
-            });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (error) {
-            const errMsg = `A getUserMedia error occured: ${error}`;
-            console.log(errMsg);
-            new Notice(errMsg, 0);
+            const message = `Could not access the microphone: ${error}`;
+            console.error(message);
+            new Notice(message, 0);
             this.starting = false;
             this.recordingProfile = null;
             return;
+        }
+
+        const { format, usedFallback } = resolveRecordingFormat(
+            this.plugin.settings.recordingAudioFormat,
+        );
+        try {
+            this.mediaRecorder = format
+                ? new MediaRecorder(stream, { mimeType: format.mimeType })
+                : new MediaRecorder(stream);
+            this.recordingMimeType =
+                this.mediaRecorder.mimeType || format?.mimeType || "";
+            this.recordingExtension =
+                audioExtensionFromMimeType(this.recordingMimeType) ??
+                format?.extension ??
+                "";
+            if (!this.recordingExtension) {
+                throw new Error(
+                    `The browser reported an unsupported recording format: ${this.recordingMimeType || "unknown"}.`,
+                );
+            }
+        } catch (error) {
+            stream.getTracks().forEach((track) => track.stop());
+            const message = `Could not start audio recording: ${error}`;
+            console.error(message);
+            new Notice(message, 0);
+            this.mediaRecorder = null;
+            this.recordingMimeType = "";
+            this.recordingExtension = "";
+            this.starting = false;
+            this.recordingProfile = null;
+            return;
+        }
+
+        if (usedFallback) {
+            new Notice(
+                "The selected recording format is unavailable. Using an available format instead.",
+            );
         }
 
         this.starting = false;
@@ -115,8 +152,13 @@ export class AudioRecorder {
             return;
         }
 
-        this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        const recorder = this.mediaRecorder;
+        const mimeType = recorder.mimeType || this.recordingMimeType;
+        const extension = this.recordingExtension;
+        recorder.stream.getTracks().forEach((track) => track.stop());
         this.mediaRecorder = null;
+        this.recordingMimeType = "";
+        this.recordingExtension = "";
 
         if (this.abort) {
             this.insertionTarget = null;
@@ -134,10 +176,11 @@ export class AudioRecorder {
         let handedOff = false;
         try {
             const blob = new Blob(this.chunks, {
-                type: AudioRecorder.mimeType,
+                type: mimeType,
             });
 
-            const [filePath, fileName] = await this.getAndCreateSavePath();
+            const [filePath, fileName] =
+                await this.getAndCreateSavePath(extension);
             const saveAudio = async () => {
                 await this.plugin.app.vault.createBinary(
                     filePath,
@@ -176,14 +219,14 @@ export class AudioRecorder {
         }
     }
 
-    private async getAndCreateSavePath(): Promise<
+    private async getAndCreateSavePath(extension: string): Promise<
         readonly [filePath: string, fileName: string]
     > {
         if (!this.plugin.settings.saveAudioFile) {
             return ["", ""];
         }
 
-        const fileName = `recording-${Date.now()}.webm`;
+        const fileName = `recording-${Date.now()}.${extension}`;
 
         if (this.plugin.settings.saveByNoteLocation) {
             const activeFile = this.plugin.app.workspace.getActiveFile();

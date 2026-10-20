@@ -9,24 +9,26 @@ import {
 
 const WAV_SAMPLE_RATE = 16000;
 
-// Formats accepted by the OpenRouter STT endpoint (see STTInlineInputAudio).
-const STT_AUDIO_FORMATS = [
+const AUDIO_FORMATS = [
     "wav",
     "mp3",
+    "aiff",
+    "aac",
+    "ogg",
     "flac",
     "m4a",
-    "ogg",
     "webm",
-    "aac",
-];
+] as const;
 
 const MIME_FORMAT_ALIASES: Record<string, string> = {
     mpeg: "mp3",
     "x-wav": "wav",
     "x-m4a": "m4a",
+    mp4: "m4a",
     "x-flac": "flac",
     "x-aiff": "aiff",
     "x-pn-aiff": "aiff",
+    "x-aac": "aac",
 };
 
 // Maps the free-text language setting to ISO-639-1 codes, which are required
@@ -102,22 +104,41 @@ function languageToIsoCode(language: string): string | undefined {
     return LANGUAGE_TO_ISO[normalized];
 }
 
-function audioFormatFromMime(mimeType: string): string | undefined {
-    const subtype = mimeType
+function canonicalAudioFormat(value: string): string | undefined {
+    const subtype = value
         .split(";")[0]
         .trim()
         .toLowerCase()
-        .replace("audio/", "");
+        .replace(/^audio\//, "");
 
     if (!subtype) {
         return undefined;
     }
 
-    return STT_AUDIO_FORMATS.includes(subtype)
-        ? subtype
-        : STT_AUDIO_FORMATS.find(
-              (format) => MIME_FORMAT_ALIASES[subtype] === format,
-          );
+    const format = MIME_FORMAT_ALIASES[subtype] ?? subtype;
+    return AUDIO_FORMATS.includes(format as (typeof AUDIO_FORMATS)[number])
+        ? format
+        : undefined;
+}
+
+function audioFormatFromBlob(blob: Blob): string {
+    const mimeFormat = canonicalAudioFormat(blob.type);
+    if (mimeFormat) {
+        return mimeFormat;
+    }
+
+    const fileName = (blob as Blob & { name?: unknown }).name;
+    if (typeof fileName === "string") {
+        const extension = fileName.split(".").pop() ?? "";
+        const fileFormat = canonicalAudioFormat(extension);
+        if (fileFormat) {
+            return fileFormat;
+        }
+    }
+
+    throw new Error(
+        "Could not determine the audio format. OpenRouter will receive the original file without conversion.",
+    );
 }
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
@@ -161,8 +182,8 @@ function encodeWav16BitMono(buffer: AudioBuffer): ArrayBuffer {
     writeString(8, "WAVE");
     writeString(12, "fmt ");
     view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // mono
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
     view.setUint32(24, buffer.sampleRate, true);
     view.setUint32(28, buffer.sampleRate * 2, true);
     view.setUint16(32, 2, true);
@@ -184,27 +205,18 @@ function encodeWav16BitMono(buffer: AudioBuffer): ArrayBuffer {
     return wav;
 }
 
-/**
- * Decodes the given audio blob and re-encodes it as 16 kHz mono 16-bit WAV,
- * a format that the chat completions endpoint accepts (input_audio.format).
- */
-async function convertToWav(blob: Blob): Promise<ArrayBuffer> {
-    const raw = await blobToArrayBuffer(blob);
-
+async function convertToWav(blob: Blob): Promise<Blob> {
     const decoder = new OfflineAudioContext(1, 1, WAV_SAMPLE_RATE);
-    const decoded = await decoder.decodeAudioData(raw);
-
+    const decoded = await decoder.decodeAudioData(await blob.arrayBuffer());
     const frames = Math.max(1, Math.ceil(decoded.duration * WAV_SAMPLE_RATE));
     const converter = new OfflineAudioContext(1, frames, WAV_SAMPLE_RATE);
-
     const source = converter.createBufferSource();
     source.buffer = decoded;
     source.connect(converter.destination);
     source.start(0);
 
     const rendered = await converter.startRendering();
-
-    return encodeWav16BitMono(rendered);
+    return new Blob([encodeWav16BitMono(rendered)], { type: "audio/wav" });
 }
 
 function errorFromResponse(response: RequestUrlResponse): Error {
@@ -261,11 +273,15 @@ export class OpenRouterProvider implements TranscriptionProvider {
             );
         }
 
+        const audio = this.plugin.settings.openRouterConvertAudioToWav
+            ? await convertToWav(blob)
+            : blob;
+
         if (this.profile.openRouterModelIsStt) {
-            return await this.transcribeWithSttModel(blob);
+            return await this.transcribeWithSttModel(audio);
         }
 
-        return await this.transcribeWithChatModel(blob);
+        return await this.transcribeWithChatModel(audio);
     }
 
     async postProcess(transcript: string): Promise<string> {
@@ -309,12 +325,12 @@ export class OpenRouterProvider implements TranscriptionProvider {
     }
 
     /**
-     * Chat models are called via /chat/completions with the audio as an
-     * input_audio content part (base64 wav) plus the prompt as text part.
+     * Chat models are called via /chat/completions with the original audio as
+     * a base64 input_audio content part plus the prompt as text.
      * The provider ranking is sent as provider.order.
      */
     private async transcribeWithChatModel(blob: Blob): Promise<string> {
-        const wav = await convertToWav(blob);
+        const audio = await blobToArrayBuffer(blob);
 
         const request: Record<string, unknown> = {
             model: this.profile.openRouterModel,
@@ -325,8 +341,8 @@ export class OpenRouterProvider implements TranscriptionProvider {
                         {
                             type: "input_audio",
                             input_audio: {
-                                data: arrayBufferToBase64(wav),
-                                format: "wav",
+                                data: arrayBufferToBase64(audio),
+                                format: audioFormatFromBlob(blob),
                             },
                         },
                         {
@@ -366,24 +382,13 @@ export class OpenRouterProvider implements TranscriptionProvider {
      * is not supported on this endpoint (see docs).
      */
     private async transcribeWithSttModel(blob: Blob): Promise<string> {
-        const format = audioFormatFromMime(blob.type);
-
-        let audio: ArrayBuffer;
-        let audioFormat: string;
-
-        if (format) {
-            audio = await blobToArrayBuffer(blob);
-            audioFormat = format;
-        } else {
-            audio = await convertToWav(blob);
-            audioFormat = "wav";
-        }
+        const audio = await blobToArrayBuffer(blob);
 
         const request: Record<string, unknown> = {
             model: this.profile.openRouterModel,
             input_audio: {
                 data: arrayBufferToBase64(audio),
-                format: audioFormat,
+                format: audioFormatFromBlob(blob),
             },
         };
 

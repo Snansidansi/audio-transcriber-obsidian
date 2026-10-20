@@ -18,6 +18,7 @@ import {
 import { Statistics } from "./statistics";
 import { StatusBar } from "./statusBar";
 import { renderSettingsTabs } from "./settingsComponents";
+import { getSupportedRecordingFormats } from "./audioFormats";
 
 export type TranscriptionProviderName = "gemini" | "openrouter";
 
@@ -49,6 +50,8 @@ export interface GeminiTranscriberSettings {
     openRouterModelCache: OpenRouterModelCache | undefined;
     openRouterPostProcessingModelCache: OpenRouterModelCache | undefined;
     openRouterProviderCache: Record<string, string[]>;
+    openRouterConvertAudioToWav: boolean;
+    recordingAudioFormat: string;
     saveAudioFile: boolean;
     saveAudioOnlyOnError: boolean;
     saveByNoteLocation: boolean;
@@ -94,6 +97,8 @@ export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
     openRouterModelCache: undefined,
     openRouterPostProcessingModelCache: undefined,
     openRouterProviderCache: {},
+    openRouterConvertAudioToWav: false,
+    recordingAudioFormat: "auto",
     saveAudioFile: true,
     saveAudioOnlyOnError: false,
     audioFileSaveLocation: "",
@@ -350,6 +355,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
     }
 
     private renderOutputTab(containerEl: HTMLElement) {
+        this.renderRecordingFormatSetting(containerEl);
+
         new Setting(containerEl)
             .setName("Copy transcripts to clipboard")
             .setDesc("Automatically copy the completed transcript.")
@@ -376,6 +383,40 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             );
 
         this.renderSaveAudioSettings(containerEl);
+    }
+
+    private renderRecordingFormatSetting(containerEl: HTMLElement) {
+        const formats = getSupportedRecordingFormats();
+        const currentFormat = this.plugin.settings.recordingAudioFormat;
+        const isCurrentFormatAvailable = formats.some(
+            (format) => format.id === currentFormat,
+        );
+
+        new Setting(containerEl)
+            .setName("Recording format")
+            .setDesc(
+                formats.length > 0
+                    ? "Formats are detected from this device's recording support. Automatic prefers WebM/Opus when available."
+                    : "No recording formats were detected. The browser default will be used.",
+            )
+            .addDropdown((dropdown) => {
+                dropdown.addOption("auto", "Automatic (recommended)");
+                for (const format of formats) {
+                    dropdown.addOption(format.id, format.name);
+                }
+                if (currentFormat !== "auto" && !isCurrentFormatAvailable) {
+                    dropdown.addOption(
+                        currentFormat,
+                        "Saved format (unavailable on this device)",
+                    );
+                }
+                dropdown
+                    .setValue(currentFormat)
+                    .onChange(async (value) => {
+                        this.plugin.settings.recordingAudioFormat = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
     }
 
     private renderAppearanceTab(containerEl: HTMLElement) {
@@ -491,6 +532,18 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             href: "https://openrouter.ai/models",
             text: "Browse models on openrouter.ai",
         });
+
+        new Setting(containerEl)
+            .setName("Convert audio to WAV before sending")
+            .setDesc("WAV is uncompressed and can make uploads much larger.")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.openRouterConvertAudioToWav)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openRouterConvertAudioToWav = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
 
         if (selectedModel && !this.isSttSelected()) {
             const info = cache?.models.find(
