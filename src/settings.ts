@@ -713,14 +713,16 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
         currentEffort: string,
         onChange: (value: string) => Promise<void>,
     ) {
+        const savedEffort = currentEffort || "Use model default";
+
         if (!model) {
             new Setting(containerEl)
                 .setName("Reasoning strength")
                 .setClass("indent-setting")
                 .setDesc(
                     metadataLoaded
-                        ? "Model reasoning options are not available in the cached model list. Refresh the list and reselect the model."
-                        : "Refresh the model list to load reasoning support for the selected model.",
+                        ? `Model reasoning options are not available in the cached model list. Refresh the list and reselect the model. Saved setting: ${savedEffort}.`
+                        : `Refresh the model list to load reasoning support for the selected model. Saved setting: ${savedEffort}.`,
                 );
             return;
         }
@@ -732,8 +734,8 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                 .setClass("indent-setting")
                 .setDesc(
                     metadataLoaded
-                        ? "The selected model does not expose selectable reasoning effort levels."
-                        : "Refresh the model list to load reasoning support for the selected model.",
+                        ? `The selected model does not expose selectable reasoning effort levels. Saved setting: ${savedEffort}.`
+                        : `Refresh the model list to load reasoning support for the selected model. Saved setting: ${savedEffort}.`,
                 );
             return;
         }
@@ -742,26 +744,25 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName("Reasoning strength")
                 .setClass("indent-setting")
-                .setDesc(`Only supported level: ${efforts[0]}.`);
+                .setDesc(
+                    `Only supported level: ${efforts[0]}. Saved setting: ${savedEffort}.`,
+                );
             return;
         }
 
         const selectedEffort = efforts.includes(currentEffort)
             ? currentEffort
-            : model.defaultReasoningEffort &&
-                model.defaultReasoningEffort !== "none" &&
-                efforts.includes(model.defaultReasoningEffort)
-              ? model.defaultReasoningEffort
-              : "";
+            : "";
+        const desc = currentEffort && !efforts.includes(currentEffort)
+            ? `Saved setting "${currentEffort}" is not supported by this model. Choose a supported effort or use the model default.`
+            : "Choose a supported reasoning effort for this model.";
 
         new Setting(containerEl)
             .setName("Reasoning strength")
             .setClass("indent-setting")
-            .setDesc("Choose a supported reasoning effort for this model.")
+            .setDesc(desc)
             .addDropdown((dropdown) => {
-                dropdown
-                    .addOption("", "Use model default")
-                    .setValue(selectedEffort);
+                dropdown.addOption("", "Use model default");
 
                 for (const effort of efforts) {
                     dropdown.addOption(
@@ -770,7 +771,7 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
                     );
                 }
 
-                dropdown.onChange(onChange);
+                dropdown.setValue(selectedEffort).onChange(onChange);
             });
     }
 
