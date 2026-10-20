@@ -1,6 +1,7 @@
 import GeminiTranscriberPlugin from "main";
 import { Notice } from "obsidian";
 import { openFilePicker } from "./filePicker";
+import { chooseTranscriptionProfile } from "./profilePicker";
 import { StatisticsModal } from "./statistics";
 import { Transcriber } from "./transcriber";
 
@@ -100,7 +101,11 @@ export function addCommands(plugin: GeminiTranscriberPlugin): void {
                 return;
             }
 
-            const profile = plugin.getProfileSnapshot();
+            const profile = await chooseTranscriptionProfile(plugin);
+            if (!profile) {
+                return;
+            }
+
             const target = plugin.transcriber.captureInsertionTarget(
                 false,
                 profile,
