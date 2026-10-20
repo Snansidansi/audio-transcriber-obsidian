@@ -245,12 +245,17 @@ export class Transcriber {
         const message =
             (error instanceof Error ? error.message : String(error)) ||
             "Unknown post-processing error.";
+        const quotedTranscript = transcript
+            .replace(/\r\n?/g, "\n")
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n");
         const quotedError = message
             .replace(/\r\n?/g, "\n")
             .split("\n")
             .map((line) => `> ${line}`)
             .join("\n");
 
-        return `${transcript}\n\n> [!failure] Failure\n${quotedError}`;
+        return `> [!note]- Raw Transcription\n${quotedTranscript}\n\n> [!failure] Post-processing failed\n${quotedError}`;
     }
 }
