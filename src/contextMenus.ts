@@ -14,6 +14,7 @@ export function addContextMenus(plugin: GeminiTranscriberPlugin) {
             menu.setUseNativeMenu(false);
             const profileMenu = new Menu().setUseNativeMenu(false);
             let closeTimeout: number | undefined;
+            let isPointerOverProfileMenu = false;
 
             const clearCloseTimeout = () => {
                 if (closeTimeout !== undefined) {
@@ -26,28 +27,15 @@ export function addContextMenus(plugin: GeminiTranscriberPlugin) {
                 closeTimeout = window.setTimeout(() => profileMenu.hide(), 250);
             };
 
-            profileMenu.onHide(clearCloseTimeout);
-            menu.onHide(() => profileMenu.hide());
-
-            for (const profile of plugin.settings.profiles) {
-                const isActive = profile.id === plugin.settings.activeProfileId;
-                profileMenu.addItem((item) => {
-                    item.setTitle(
-                        createHoverLabel(
-                            `${profile.name}${isActive ? " (active)" : ""}`,
-                            clearCloseTimeout,
-                            scheduleClose,
-                        ),
-                    )
-                        .setChecked(isActive)
-                        .onClick(() => {
-                            clearCloseTimeout();
-                            profileMenu.hide();
-                            menu.hide();
-                            void transcribeFileWithProfile(plugin, file, profile.id);
-                        });
-                });
-            }
+            profileMenu.onHide(() => {
+                isPointerOverProfileMenu = false;
+                clearCloseTimeout();
+            });
+            menu.onHide(() => {
+                if (!isPointerOverProfileMenu) {
+                    profileMenu.hide();
+                }
+            });
 
             const activeProfile = plugin.getActiveProfile();
             menu.addItem((item) => {
@@ -77,6 +65,33 @@ export function addContextMenus(plugin: GeminiTranscriberPlugin) {
                         );
                     });
             });
+
+            for (const profile of plugin.settings.profiles) {
+                const isActive = profile.id === plugin.settings.activeProfileId;
+                profileMenu.addItem((item) => {
+                    item.setTitle(
+                        createHoverLabel(
+                            `${profile.name}${isActive ? " (active)" : ""}`,
+                            () => {
+                                isPointerOverProfileMenu = true;
+                                clearCloseTimeout();
+                            },
+                            () => {
+                                isPointerOverProfileMenu = false;
+                                scheduleClose();
+                            },
+                        ),
+                    )
+                        .setChecked(isActive)
+                        .onClick(() => {
+                            clearCloseTimeout();
+                            isPointerOverProfileMenu = false;
+                            profileMenu.hide();
+                            menu.hide();
+                            void transcribeFileWithProfile(plugin, file, profile.id);
+                        });
+                });
+            }
         }),
     );
 }
