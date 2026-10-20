@@ -150,9 +150,11 @@ export class Transcriber {
 
         const transcriptionId = this.beginTranscription();
         let targetHandled = target.kind !== "editor-anchor";
+        let transcriptionCompleted = false;
 
         try {
             const transcript = await provider.transcribe(blob);
+            transcriptionCompleted = true;
             let finalTranscript = transcript;
             let statisticsTranscript = transcript;
 
@@ -185,6 +187,23 @@ export class Transcriber {
             this.plugin.statistics?.incrementTranscribed();
             this.plugin.statistics?.save();
         } catch (error: unknown) {
+            if (!transcriptionCompleted) {
+                try {
+                    await this.responseHandler.handleTranscriptionFailure(
+                        filename,
+                        target,
+                    );
+                    if (target.kind === "editor-anchor") {
+                        targetHandled = true;
+                    }
+                } catch (handlingError) {
+                    console.error(
+                        "Could not embed audio after transcription failure",
+                        handlingError,
+                    );
+                }
+            }
+
             const message =
                 error instanceof Error ? error.message : String(error);
             if (message.contains("API key not valid")) {

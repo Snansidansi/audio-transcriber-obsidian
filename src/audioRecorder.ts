@@ -139,7 +139,7 @@ export class AudioRecorder {
 
             const [filePath, fileName] = await this.getAndCreateSavePath();
             if (this.plugin.settings.saveAudioFile) {
-                this.plugin.app.vault.createBinary(
+                await this.plugin.app.vault.createBinary(
                     filePath,
                     await blob.arrayBuffer(),
                 );

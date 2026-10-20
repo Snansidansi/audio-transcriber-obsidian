@@ -52,6 +52,28 @@ export class ResponseHandler {
         new Notice("Finished transcription");
     }
 
+    async handleTranscriptionFailure(
+        audioFilename: string | undefined,
+        target: InsertionTarget,
+    ) {
+        if (target.kind === "clipboard") {
+            return;
+        }
+
+        const audioEmbed = this.getAudioEmbed(audioFilename);
+        if (target.kind === "editor-anchor") {
+            if (audioEmbed && (await this.replaceAnchor(target, audioEmbed))) {
+                return;
+            }
+
+            await this.removeAnchor(target);
+        }
+
+        if (audioEmbed) {
+            await this.createTranscriptFile("", audioFilename);
+        }
+    }
+
     private saveTranscriptInClipboard(text: string) {
         navigator.clipboard.writeText(text);
     }
