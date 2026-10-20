@@ -1,5 +1,5 @@
 import GeminiTranscriberPlugin from "main";
-import { Notice } from "obsidian";
+import { App, Modal, Notice } from "obsidian";
 import { GeminiProvider } from "./providers/geminiProvider";
 import { OpenRouterProvider } from "./providers/openRouterProvider";
 import { TranscriptionProvider } from "./providers/transcriptionProvider";
@@ -8,6 +8,42 @@ import type { InsertionTarget } from "./insertionTarget";
 import type { TranscriptionProfile } from "./settings";
 
 type TranscriptionPhase = "processing" | "post-processing";
+
+class TranscriptionErrorModal extends Modal {
+    private message: string;
+
+    constructor(app: App, message: string) {
+        super(app);
+        this.message = message;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl("h2", { text: "Transcription failed" });
+        const details = contentEl.createEl("pre", { text: this.message });
+        details.setCssStyles({
+            maxHeight: "50vh",
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+        });
+        const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+        buttons
+            .createEl("button", { text: "Copy error" })
+            .addEventListener("click", async () => {
+                try {
+                    await navigator.clipboard.writeText(this.message);
+                    new Notice("Error copied to clipboard.");
+                } catch {
+                    new Notice("Could not copy error to clipboard.", 0);
+                }
+            });
+        buttons
+            .createEl("button", { text: "OK", cls: "mod-cta" })
+            .addEventListener("click", () => this.close());
+    }
+}
 
 export class Transcriber {
     static validFileFormats = [
@@ -149,18 +185,21 @@ export class Transcriber {
             this.plugin.statistics?.incrementTranscribed();
             this.plugin.statistics?.save();
         } catch (error: unknown) {
-            if (error instanceof Error) {
-                if (error.message.contains("API key not valid")) {
-                    new Notice(
-                        `Error: Your API key for ${provider.displayName} is invalid.`,
-                        0,
-                    );
-                    return;
-                } else {
-                    console.log(error);
-                    new Notice(error.message, 0);
-                }
+            const message =
+                error instanceof Error ? error.message : String(error);
+            if (message.contains("API key not valid")) {
+                new TranscriptionErrorModal(
+                    this.plugin.app,
+                    `Your API key for ${provider.displayName} is invalid.`,
+                ).open();
+                return;
             }
+
+            console.error(error);
+            new TranscriptionErrorModal(
+                this.plugin.app,
+                message || `Unknown error from ${provider.displayName}.`,
+            ).open();
         } finally {
             if (!targetHandled) {
                 await this.responseHandler.removeAnchor(target);

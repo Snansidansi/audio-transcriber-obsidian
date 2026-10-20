@@ -86,6 +86,9 @@ interface OpenRouterErrorBody {
     error?: {
         code?: number;
         message?: string;
+        metadata?: {
+            raw?: string;
+        };
     };
 }
 
@@ -205,16 +208,24 @@ async function convertToWav(blob: Blob): Promise<ArrayBuffer> {
 }
 
 function errorFromResponse(response: RequestUrlResponse): Error {
-    let message: string | undefined;
+    let error: OpenRouterErrorBody["error"];
 
     try {
-        message = (response.json as OpenRouterErrorBody)?.error?.message;
+        error = (response.json as OpenRouterErrorBody)?.error;
     } catch {
-        message = undefined;
+        error = undefined;
     }
 
+    const details = [
+        error?.message,
+        error?.code === undefined ? undefined : `code ${error.code}`,
+        error?.metadata?.raw,
+    ].filter(Boolean);
+
     return new Error(
-        message ?? `OpenRouter request failed (HTTP ${response.status}).`,
+        details.length > 0
+            ? `OpenRouter request failed (HTTP ${response.status}): ${details.join("\n")}`
+            : `OpenRouter request failed (HTTP ${response.status}).`,
     );
 }
 
