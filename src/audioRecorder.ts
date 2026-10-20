@@ -32,6 +32,10 @@ export class AudioRecorder {
         return this.starting;
     }
 
+    isRecordingWithProfile(profileId: string): boolean {
+        return this.recordingProfile?.id === profileId;
+    }
+
     async startRecording(profile = this.plugin.getActiveProfile()) {
         if (this.abort || this.starting || this.mediaRecorder) {
             return;

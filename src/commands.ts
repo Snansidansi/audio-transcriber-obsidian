@@ -163,10 +163,19 @@ export function syncProfileCommands(plugin: GeminiTranscriberPlugin): void {
                     return;
                 }
 
-                if (
-                    plugin.audioRecorder.isStarting() ||
-                    plugin.audioRecorder.getState() !== undefined
-                ) {
+                const recordingState = plugin.audioRecorder.getState();
+                if (plugin.audioRecorder.isStarting() || recordingState !== undefined) {
+                    if (
+                        plugin.audioRecorder.isRecordingWithProfile(
+                            currentProfile.id,
+                        ) &&
+                        recordingState !== undefined &&
+                        recordingState !== "inactive"
+                    ) {
+                        plugin.audioRecorder.stopRecording();
+                        return;
+                    }
+
                     new Notice(
                         "Stop the current recording before starting this profile.",
                     );
