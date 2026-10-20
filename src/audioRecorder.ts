@@ -138,11 +138,18 @@ export class AudioRecorder {
             });
 
             const [filePath, fileName] = await this.getAndCreateSavePath();
-            if (this.plugin.settings.saveAudioFile) {
+            const saveAudio = async () => {
                 await this.plugin.app.vault.createBinary(
                     filePath,
                     await blob.arrayBuffer(),
                 );
+            };
+            const saveAudioOnlyOnError =
+                this.plugin.settings.saveAudioFile &&
+                this.plugin.settings.saveAudioOnlyOnError;
+
+            if (this.plugin.settings.saveAudioFile && !saveAudioOnlyOnError) {
+                await saveAudio();
             }
 
             await this.plugin.statistics?.addAudioFileDuration(blob);
@@ -154,6 +161,7 @@ export class AudioRecorder {
                 fileName,
                 insertionTarget ?? { kind: "transcript-file" },
                 profile,
+                saveAudioOnlyOnError ? saveAudio : undefined,
             );
             handedOff = true;
         } catch (error) {

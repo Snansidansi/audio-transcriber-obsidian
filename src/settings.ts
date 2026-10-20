@@ -50,6 +50,7 @@ export interface GeminiTranscriberSettings {
     openRouterPostProcessingModelCache: OpenRouterModelCache | undefined;
     openRouterProviderCache: Record<string, string[]>;
     saveAudioFile: boolean;
+    saveAudioOnlyOnError: boolean;
     saveByNoteLocation: boolean;
     audioFileSaveLocation: string;
     transcriptSaveLocation: string;
@@ -94,6 +95,7 @@ export const DEFAULT_SETTINGS: Partial<GeminiTranscriberSettings> = {
     openRouterPostProcessingModelCache: undefined,
     openRouterProviderCache: {},
     saveAudioFile: true,
+    saveAudioOnlyOnError: false,
     audioFileSaveLocation: "",
     transcriptSaveLocation: "",
     embedAudioFile: false,
@@ -1216,6 +1218,21 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
 
         if (this.plugin.settings.saveAudioFile) {
             new Setting(containerEl)
+                .setName("Save audio only on error")
+                .setDesc(
+                    "Only save the recorded audio if transcription fails.",
+                )
+                .setClass("indent-setting")
+                .addToggle((toggle) =>
+                    toggle
+                        .setValue(this.plugin.settings.saveAudioOnlyOnError)
+                        .onChange(async (value) => {
+                            this.plugin.settings.saveAudioOnlyOnError = value;
+                            await this.plugin.saveSettings();
+                        }),
+                );
+
+            new Setting(containerEl)
                 .setName("Save audio file at note location")
                 .setDesc(
                     "If a note is open, the audio file for the transcription will be saved with that note, instead of the default audio file save location.",
@@ -1250,7 +1267,7 @@ export class GeminiTranscriberSettingsTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName("Embed audio file in current note")
                 .setDesc(
-                    "If enabled the recorded audio file will be embedded before the transcription.",
+                    "Embed the saved recording in the note. When audio is saved only on error, it is embedded only if transcription fails.",
                 )
                 .setClass("indent-setting")
                 .addToggle((toggle) =>

@@ -137,22 +137,21 @@ export class Transcriber {
         filename: string | undefined,
         target: InsertionTarget,
         profile = this.plugin.getProfileSnapshot(),
+        saveAudioOnFailure?: () => Promise<void>,
     ) {
         const provider = this.createProvider(profile);
-        if (!provider.isConfigured()) {
-            await this.responseHandler.removeAnchor(target);
-            new Notice(
-                `Error: No API key configured for ${provider.displayName}.`,
-                0,
-            );
-            return;
-        }
-
         const transcriptionId = this.beginTranscription();
         let targetHandled = target.kind !== "editor-anchor";
         let transcriptionCompleted = false;
+        let audioSaved = !saveAudioOnFailure;
 
         try {
+            if (!provider.isConfigured()) {
+                throw new Error(
+                    `No API key configured for ${provider.displayName}.`,
+                );
+            }
+
             const transcript = await provider.transcribe(blob);
             transcriptionCompleted = true;
             let finalTranscript = transcript;
@@ -177,7 +176,7 @@ export class Transcriber {
 
             await this.responseHandler.handleResponse(
                 finalTranscript,
-                filename,
+                audioSaved ? filename : undefined,
                 target,
                 statisticsTranscript,
             );
@@ -189,8 +188,12 @@ export class Transcriber {
         } catch (error: unknown) {
             if (!transcriptionCompleted) {
                 try {
+                    if (saveAudioOnFailure) {
+                        await saveAudioOnFailure();
+                        audioSaved = true;
+                    }
                     await this.responseHandler.handleTranscriptionFailure(
-                        filename,
+                        audioSaved ? filename : undefined,
                         target,
                     );
                     if (target.kind === "editor-anchor") {
