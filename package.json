@@ -1,6 +1,6 @@
 {
     "name": "audio-transcriber",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "description": "Transcribe live audio recordings or existing files using Gemini or OpenRouter.",
     "main": "main.js",
     "scripts": {
